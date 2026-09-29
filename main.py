@@ -24,7 +24,6 @@ GROQ_KEYS = [
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ================= Render Dummy Server =================
-# Render requires a web server to pass health checks, otherwise it kills the bot.
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -41,21 +40,25 @@ async def handle_bot_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not message or not message.from_user:
         return
 
-    # DEBUG PRINT: Show all incoming group messages in your Mac Terminal / Render Logs
+    # DEBUG PRINT: Print every single message received in Render logs
     sender_username = message.from_user.username or "NoUsername"
-    print(f"📩 Received message from @{sender_username}: {message.text or message.caption}")
+    print(f"📩 Received update from @{sender_username}")
 
     # Check if message is from the ghost bot (case-insensitive)
     if sender_username.lower() == TARGET_BOT_USERNAME.lower():
         print("✅ Message identified from target ghost bot! Generating reply...")
-        prompt_text = message.caption or message.text or "Analyze this image."
+        prompt_text = message.caption or message.text or "Analyze this image/document and answer the question."
 
-        # Case 1: Image attached -> Use Gemini
-        if message.photo:
+        # Case 1: Image OR File Attachment (PNG/JPG Document) -> Use Gemini
+        if message.photo or message.document:
             await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
             try:
-                photo_file = await message.photo[-1].get_file()
-                image_bytes = await photo_file.download_as_bytearray()
+                if message.photo:
+                    file_obj = await message.photo[-1].get_file()
+                else:
+                    file_obj = await message.document.get_file()
+                
+                image_bytes = await file_obj.download_as_bytearray()
                 
                 response = gemini_client.models.generate_content(
                     model="gemini-2.5-flash",
@@ -66,9 +69,9 @@ async def handle_bot_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 answer = response.text
             except Exception as e:
-                answer = f"Error processing image with Gemini: {e}"
+                answer = f"Error processing image/document with Gemini: {e}"
 
-        # Case 2: Text only -> Use Groq with Fallbacks
+        # Case 2: Pure Text -> Use Groq
         elif message.text:
             await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
             answer = "Error: All Groq API keys failed or are invalid."
@@ -99,18 +102,16 @@ async def handle_bot_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
         print("🚀 Reply sent successfully!")
 
 if __name__ == "__main__":
-    # Start the dummy web server on a background thread for Render
     threading.Thread(target=run_web_server, daemon=True).start()
 
-    # Start the Telegram Bot
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & (~filters.COMMAND), handle_bot_message))
+    
+    # Catch ALL incoming message types (Photos, Documents, Text) except group status updates
+    app.add_handler(MessageHandler(filters.ALL & (~filters.StatusUpdate.ALL), handle_bot_message))
     
     print("Responder Bot running with Groq Fallbacks + Gemini Vision...")
     
-    # --- Fix for Render (Python 3.14+ asyncio loop handling) ---
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    # -----------------------------------------------------------
     
     app.run_polling()
