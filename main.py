@@ -1,5 +1,6 @@
 import os
 import threading
+import asyncio
 from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -8,7 +9,6 @@ from google import genai
 from google.genai import types
 from groq import Groq
 
-# ================= Configuration =================
 # ================= Configuration =================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TARGET_BOT_USERNAME = "ghost475_bot"
@@ -41,7 +41,7 @@ async def handle_bot_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not message or not message.from_user:
         return
 
-    # DEBUG PRINT: Show all incoming group messages in your Mac Terminal
+    # DEBUG PRINT: Show all incoming group messages in your Mac Terminal / Render Logs
     sender_username = message.from_user.username or "NoUsername"
     print(f"📩 Received message from @{sender_username}: {message.text or message.caption}")
 
@@ -107,4 +107,10 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & (~filters.COMMAND), handle_bot_message))
     
     print("Responder Bot running with Groq Fallbacks + Gemini Vision...")
+    
+    # --- Fix for Render (Python 3.14+ asyncio loop handling) ---
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # -----------------------------------------------------------
+    
     app.run_polling()
